@@ -1,0 +1,198 @@
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from sqlalchemy.orm import Session
+from datetime import datetime
+import json
+import requests
+import os
+from pathlib import Path
+
+from app.database import get_db
+from app.models import User, Video, PredictionStatus
+from app.schemas import PredictionResult, VideoResponse
+from app.auth import get_current_user
+
+router = APIRouter()
+
+# Model API URL
+MODEL_API_URL = os.getenv("MODEL_API_URL", "http://localhost:5000")
+
+def deepfake_analysis(video_id: int, db: Session):
+    """
+    Call the model API to analyze video for deepfake detection
+    """
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        return
+    
+    # Update status to processing
+    video.status = PredictionStatus.PROCESSING
+    db.commit()
+    
+    try:
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        absolute_video_path = os.path.join(backend_dir, video.file_path)
+
+        if not os.path.exists(absolute_video_path):
+            video.status = PredictionStatus.FAILED
+            video.prediction_details = json.dumps({
+                "error": "Uploaded video file not found on backend server"
+            })
+            db.commit()
+            return
+        
+        # Send the uploaded media file to model service.
+        with open(absolute_video_path, "rb") as media_file:
+            response = requests.post(
+                f"{MODEL_API_URL}/analyze",
+                files={
+                    "file": (
+                        Path(absolute_video_path).name,
+                        media_file,
+                        "application/octet-stream",
+                    )
+                },
+                timeout=300,  # 5 minutes timeout
+            )
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Update video with results
+            video.status = PredictionStatus.COMPLETED
+            video.is_deepfake = result.get("is_deepfake", False)
+            video.confidence_score = result.get("confidence_score", 0.0)
+            video.prediction_details = json.dumps(result.get("analysis_details", {}))
+            video.processed_at = datetime.utcnow()
+        else:
+            # Model API error
+            video.status = PredictionStatus.FAILED
+            video.prediction_details = json.dumps({
+                "error": f"Model API error: {response.text}"
+            })
+    
+    except requests.exceptions.RequestException as e:
+        # Connection error
+        video.status = PredictionStatus.FAILED
+        video.prediction_details = json.dumps({
+            "error": f"Failed to connect to model API: {str(e)}"
+        })
+    
+    except Exception as e:
+        # Other errors
+        video.status = PredictionStatus.FAILED
+        video.prediction_details = json.dumps({
+            "error": f"Analysis failed: {str(e)}"
+        })
+    
+    finally:
+        db.commit()
+
+@router.post("/{video_id}/analyze", response_model=dict)
+async def start_analysis(
+    video_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Start deepfake analysis for a video"""
+    video = db.query(Video).filter(
+        Video.id == video_id,
+        Video.user_id == current_user.id
+    ).first()
+    
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+    
+    if video.status != PredictionStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Video is already {video.status}"
+        )
+    
+    # Start analysis in background
+    background_tasks.add_task(deepfake_analysis, video_id, db)
+    
+    return {
+        "message": "Analysis started",
+        "video_id": video_id,
+        "status": "processing"
+    }
+
+@router.get("/{video_id}/result", response_model=PredictionResult)
+async def get_prediction_result(
+    video_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get prediction result for a video"""
+    video = db.query(Video).filter(
+        Video.id == video_id,
+        Video.user_id == current_user.id
+    ).first()
+    
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+    
+    if video.status != PredictionStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Analysis not completed yet. Current status: {video.status}"
+        )
+    
+    # Parse prediction details
+    analysis_details = json.loads(video.prediction_details) if video.prediction_details else {}
+    
+    # Generate AI suggestions
+    suggestions = []
+    if video.is_deepfake:
+        suggestions = [
+            "⚠️ This video shows signs of manipulation",
+            "🔍 Check the source and verify authenticity",
+            "📊 Review the detailed analysis for specific anomalies",
+            "🚨 Consider reporting if this is being used maliciously"
+        ]
+    else:
+        suggestions = [
+            "✅ No significant deepfake indicators detected",
+            "💡 Always verify content from multiple sources",
+            "📈 The video passed all authenticity checks",
+            "✔️ High confidence in the authenticity of this media"
+        ]
+    
+    return {
+        "is_deepfake": video.is_deepfake,
+        "confidence_score": video.confidence_score,
+        "analysis_details": analysis_details,
+        "suggestions": suggestions
+    }
+
+@router.get("/{video_id}/status")
+async def get_analysis_status(
+    video_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Check the status of video analysis"""
+    video = db.query(Video).filter(
+        Video.id == video_id,
+        Video.user_id == current_user.id
+    ).first()
+    
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+    
+    return {
+        "video_id": video.id,
+        "status": video.status,
+        "uploaded_at": video.uploaded_at,
+        "processed_at": video.processed_at
+    }
