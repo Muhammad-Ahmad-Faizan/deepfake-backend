@@ -260,15 +260,27 @@ async def list_available_models(
 
 @router.get("/{video_id}/status")
 async def get_analysis_status(
-    video_id: int,
+    video_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db)
 ):
     """Check the status of video analysis"""
-    video = db.query(Video).filter(
-        Video.id == video_id,
-        Video.user_id == current_user.id
-    ).first()
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    from bson import ObjectId
+    try:
+        video_oid = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid video ID"
+        )
+    
+    video = db.videos.find_one({"_id": video_oid})
     
     if not video:
         raise HTTPException(
@@ -277,8 +289,8 @@ async def get_analysis_status(
         )
     
     return {
-        "video_id": video.id,
-        "status": video.status,
-        "uploaded_at": video.uploaded_at,
-        "processed_at": video.processed_at
+        "video_id": str(video.get("_id")),
+        "status": video.get("status"),
+        "uploaded_at": video.get("uploaded_at"),
+        "processed_at": video.get("processed_at")
     }
