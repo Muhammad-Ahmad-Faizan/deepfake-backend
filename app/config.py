@@ -4,6 +4,10 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./test.db"
+    # CORS / External service URLs
+    CORS_ORIGINS: str = "http://localhost:3000"
+    MODEL_API_URL: str = "http://localhost:5000"
+    MODEL_API_URLS: str = ""
     # JWT Settings
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"

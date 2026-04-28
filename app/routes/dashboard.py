@@ -19,30 +19,44 @@ async def get_dashboard_stats(
     # Total videos uploaded by user
     total_videos = db.query(func.count(Video.id)).filter(
         Video.user_id == current_user.id
-    ).scalar()
+    ).scalar() or 0
     
     # Videos analyzed (completed)
-    videos_analyzed = db.query(func.count(Video.id)).filter(
+    total_predictions = db.query(func.count(Video.id)).filter(
         Video.user_id == current_user.id,
         Video.status == PredictionStatus.COMPLETED
-    ).scalar()
+    ).scalar() or 0
     
     # Deepfakes detected
-    deepfakes_detected = db.query(func.count(Video.id)).filter(
+    deepfakes_found = db.query(func.count(Video.id)).filter(
         Video.user_id == current_user.id,
         Video.is_deepfake == True
-    ).scalar()
+    ).scalar() or 0
+    
+    # Genuine videos (total analyzed - deepfakes)
+    genuine_videos = total_predictions - deepfakes_found
+    
+    # Pending analyses (not yet completed)
+    pending_analyses = db.query(func.count(Video.id)).filter(
+        Video.user_id == current_user.id,
+        Video.status.in_([PredictionStatus.PENDING, PredictionStatus.PROCESSING])
+    ).scalar() or 0
     
     # Recent uploads (last 5)
     recent_uploads = db.query(Video).filter(
         Video.user_id == current_user.id
     ).order_by(Video.uploaded_at.desc()).limit(5).all()
     
+    # Calculate success rate
+    success_rate = (total_predictions / total_videos * 100) if total_videos > 0 else 0.0
+    
     return {
         "total_videos": total_videos,
-        "videos_analyzed": videos_analyzed,
-        "deepfakes_detected": deepfakes_detected,
-        "recent_uploads": recent_uploads
+        "total_predictions": total_predictions,
+        "deepfakes_found": deepfakes_found,
+        "genuine_videos": genuine_videos,
+        "pending_analyses": pending_analyses,
+        "success_rate": success_rate
     }
 
 @router.get("/recent-activity", response_model=list[VideoResponse])

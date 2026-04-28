@@ -77,9 +77,11 @@ class PredictionResult(BaseModel):
 # Dashboard Schemas
 class DashboardStats(BaseModel):
     total_videos: int
-    videos_analyzed: int
-    deepfakes_detected: int
-    recent_uploads: List[VideoResponse]
+    total_predictions: int
+    deepfakes_found: int
+    genuine_videos: int
+    pending_analyses: int
+    success_rate: float = 0.0
 
 # Admin Schemas
 class AdminUserUpdate(BaseModel):

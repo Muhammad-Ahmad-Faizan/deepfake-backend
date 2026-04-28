@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from datetime import datetime
+import os
 
 from app.database import get_db
 from app.models import User, Video, PredictionStatus
@@ -44,7 +45,7 @@ async def upload_video(
     
     # Create database record
     new_video = Video(
-        filename=file_path.split("\\")[-1],  # Get just the filename
+        filename=os.path.basename(file_path),
         original_filename=file.filename,
         file_path=file_path,
         file_size=file_size,

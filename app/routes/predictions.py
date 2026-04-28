@@ -16,7 +16,28 @@ router = APIRouter()
 # Model API URL
 MODEL_API_URL = os.getenv("MODEL_API_URL", "http://localhost:5000")
 
-def deepfake_analysis(video_id: int, db: Session):
+
+def get_model_api_url(model_key: str | None) -> str:
+    """
+    Resolve model service URL from env mapping.
+    Env format:
+    MODEL_API_URLS="default=http://localhost:5000,efficientnet=http://localhost:5000,fast=http://localhost:5001"
+    """
+    if not model_key:
+        return MODEL_API_URL
+
+    raw_mapping = os.getenv("MODEL_API_URLS", "")
+    model_map = {}
+    for entry in raw_mapping.split(","):
+        entry = entry.strip()
+        if not entry or "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        model_map[key.strip()] = value.strip()
+
+    return model_map.get(model_key, MODEL_API_URL)
+
+def deepfake_analysis(video_id: int, db: Session, model_key: str = "default"):
     """
     Call the model API to analyze video for deepfake detection
     """
@@ -41,9 +62,12 @@ def deepfake_analysis(video_id: int, db: Session):
             return
         
         # Send the uploaded media file to model service.
+        model_api_url = get_model_api_url(model_key)
+
         with open(absolute_video_path, "rb") as media_file:
             response = requests.post(
-                f"{MODEL_API_URL}/analyze",
+                f"{model_api_url}/analyze",
+                data={"model_key": model_key},
                 files={
                     "file": (
                         Path(absolute_video_path).name,
@@ -56,12 +80,14 @@ def deepfake_analysis(video_id: int, db: Session):
         
         if response.status_code == 200:
             result = response.json()
+            analysis_details = result.get("analysis_details", {})
+            analysis_details["model_key"] = model_key
             
             # Update video with results
             video.status = PredictionStatus.COMPLETED
             video.is_deepfake = result.get("is_deepfake", False)
             video.confidence_score = result.get("confidence_score", 0.0)
-            video.prediction_details = json.dumps(result.get("analysis_details", {}))
+            video.prediction_details = json.dumps(analysis_details)
             video.processed_at = datetime.utcnow()
         else:
             # Model API error
@@ -91,6 +117,7 @@ def deepfake_analysis(video_id: int, db: Session):
 async def start_analysis(
     video_id: int,
     background_tasks: BackgroundTasks,
+    model_key: str = "default",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -113,11 +140,12 @@ async def start_analysis(
         )
     
     # Start analysis in background
-    background_tasks.add_task(deepfake_analysis, video_id, db)
+    background_tasks.add_task(deepfake_analysis, video_id, db, model_key)
     
     return {
         "message": "Analysis started",
         "video_id": video_id,
+        "model_key": model_key,
         "status": "processing"
     }
 
@@ -171,6 +199,31 @@ async def get_prediction_result(
         "analysis_details": analysis_details,
         "suggestions": suggestions
     }
+
+@router.get("/models")
+async def list_available_models(
+    current_user: User = Depends(get_current_user),
+):
+    """List available model keys and labels from model service."""
+    model_api_url = get_model_api_url("final_model")
+    try:
+        response = requests.get(f"{model_api_url}/models", timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException:
+        return {
+            "models": [
+                {"key": "final_model", "label": "final_model.pth"},
+                {"key": "archive_model_best", "label": "archive_model_best.pth"},
+                {"key": "best_model", "label": "best_model.pth"},
+                {"key": "best_model-1", "label": "best_model-1.pth"},
+                {"key": "e1-train-1", "label": "e1-train-1.pth"},
+                {"key": "e2-train-1", "label": "e2-train-1.pth"},
+                {"key": "e5-train-1", "label": "e5-train-1.pth"},
+                {"key": "folders_model_best", "label": "folders_model_best.pth"},
+            ]
+        }
+
 
 @router.get("/{video_id}/status")
 async def get_analysis_status(
