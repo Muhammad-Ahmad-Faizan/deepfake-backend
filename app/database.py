@@ -12,7 +12,13 @@ db = None
 def connect_to_mongo():
     global client, db
     try:
-        client = MongoClient(settings.DATABASE_URL, serverSelectionTimeoutMS=5000)
+        # Use increased timeout for cloud MongoDB (10 seconds)
+        client = MongoClient(
+            settings.DATABASE_URL, 
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            retryWrites=True
+        )
         # Test connection
         client.admin.command('ping')
         db = client.deepfake_db  # Database name
