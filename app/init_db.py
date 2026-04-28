@@ -14,7 +14,7 @@ def init_db():
     """Initialize database with default admin user"""
     try:
         db = get_db()
-        if not db:
+        if db is None:
             logger.warning("⚠️  Database not connected yet")
             return
         
@@ -42,8 +42,8 @@ def init_db():
             print(f"ℹ️  Admin user already exists: {admin['email']}")
     
     except Exception as e:
-        logger.error(f"❌ Error initializing database: {e}")
-        raise
+        logger.warning(f"⚠️  Error initializing database: {e}")
+        # Don't raise - allow app to continue
 
 if __name__ == "__main__":
     print("🔧 Initializing database...")
