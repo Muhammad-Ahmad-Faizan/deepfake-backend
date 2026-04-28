@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
 from datetime import datetime
 import os
 
@@ -16,9 +15,15 @@ router = APIRouter()
 async def upload_video(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db)
 ):
     """Upload a video file for deepfake detection"""
+    
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
     
     # Validate file type
     try:
@@ -51,40 +56,54 @@ async def upload_video(
         file_size=file_size,
         file_type=file_type,
         status=PredictionStatus.PENDING,
-        user_id=current_user.id
+        user_id=str(current_user.get("_id")) if "_id" in current_user else current_user.get("id")
     )
     
-    db.add(new_video)
-    db.commit()
-    db.refresh(new_video)
+    result = db.videos.insert_one(new_video.to_dict())
     
-    return new_video
+    return {"id": str(result.inserted_id), "filename": new_video.filename, "status": new_video.status}
 
 @router.get("/videos", response_model=list[VideoResponse])
 async def get_user_videos(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db=Depends(get_db),
     skip: int = 0,
     limit: int = 10
 ):
     """Get all videos uploaded by current user"""
-    videos = db.query(Video).filter(
-        Video.user_id == current_user.id
-    ).order_by(Video.uploaded_at.desc()).offset(skip).limit(limit).all()
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
     
+    user_id = str(current_user.get("_id")) if "_id" in current_user else current_user.get("id")
+    videos = list(db.videos.find({"user_id": user_id}).skip(skip).limit(limit))
     return videos
 
 @router.get("/videos/{video_id}", response_model=VideoResponse)
 async def get_video(
-    video_id: int,
+    video_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db)
 ):
     """Get specific video by ID"""
-    video = db.query(Video).filter(
-        Video.id == video_id,
-        Video.user_id == current_user.id
-    ).first()
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    from bson import ObjectId
+    try:
+        video_oid = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid video ID"
+        )
+    
+    video = db.videos.find_one({"_id": video_oid})
     
     if not video:
         raise HTTPException(
@@ -96,15 +115,27 @@ async def get_video(
 
 @router.delete("/videos/{video_id}")
 async def delete_video(
-    video_id: int,
+    video_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db)
 ):
     """Delete a video"""
-    video = db.query(Video).filter(
-        Video.id == video_id,
-        Video.user_id == current_user.id
-    ).first()
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    from bson import ObjectId
+    try:
+        video_oid = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid video ID"
+        )
+    
+    video = db.videos.find_one({"_id": video_oid})
     
     if not video:
         raise HTTPException(
@@ -113,7 +144,6 @@ async def delete_video(
         )
     
     # Delete from database
-    db.delete(video)
-    db.commit()
+    db.videos.delete_one({"_id": video_oid})
     
     return {"message": "Video deleted successfully"}

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from sqlalchemy.orm import Session
 from datetime import datetime
 import json
 import requests
@@ -37,28 +36,36 @@ def get_model_api_url(model_key: str | None) -> str:
 
     return model_map.get(model_key, MODEL_API_URL)
 
-def deepfake_analysis(video_id: int, db: Session, model_key: str = "default"):
+def deepfake_analysis(video_id: str, db, model_key: str = "default"):
     """
     Call the model API to analyze video for deepfake detection
     """
-    video = db.query(Video).filter(Video.id == video_id).first()
+    if db is None:
+        return
+    
+    from bson import ObjectId
+    try:
+        video_oid = ObjectId(video_id)
+    except Exception:
+        return
+    
+    video = db.videos.find_one({"_id": video_oid})
     if not video:
         return
     
     # Update status to processing
-    video.status = PredictionStatus.PROCESSING
-    db.commit()
+    db.videos.update_one({"_id": video_oid}, {"$set": {"status": PredictionStatus.PROCESSING}})
     
     try:
         backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        absolute_video_path = os.path.join(backend_dir, video.file_path)
+        absolute_video_path = os.path.join(backend_dir, video.get("file_path", ""))
 
         if not os.path.exists(absolute_video_path):
-            video.status = PredictionStatus.FAILED
-            video.prediction_details = json.dumps({
-                "error": "Uploaded video file not found on backend server"
-            })
-            db.commit()
+            db.videos.update_one({"_id": video_oid}, {"$set": {
+                "status": PredictionStatus.FAILED,
+                "prediction_details": json.dumps({"error": "Uploaded video file not found on backend server"})
+            }})
+            return
             return
         
         # Send the uploaded media file to model service.
@@ -84,48 +91,62 @@ def deepfake_analysis(video_id: int, db: Session, model_key: str = "default"):
             analysis_details["model_key"] = model_key
             
             # Update video with results
-            video.status = PredictionStatus.COMPLETED
-            video.is_deepfake = result.get("is_deepfake", False)
-            video.confidence_score = result.get("confidence_score", 0.0)
-            video.prediction_details = json.dumps(analysis_details)
-            video.processed_at = datetime.utcnow()
+            db.videos.update_one({"_id": video_oid}, {"$set": {
+                "status": PredictionStatus.COMPLETED,
+                "is_deepfake": result.get("is_deepfake", False),
+                "confidence_score": result.get("confidence_score", 0.0),
+                "prediction_details": json.dumps(analysis_details),
+                "processed_at": datetime.utcnow()
+            }})
         else:
             # Model API error
-            video.status = PredictionStatus.FAILED
-            video.prediction_details = json.dumps({
-                "error": f"Model API error: {response.text}"
-            })
+            db.videos.update_one({"_id": video_oid}, {"$set": {
+                "status": PredictionStatus.FAILED,
+                "prediction_details": json.dumps({"error": f"Model API error: {response.text}"})
+            }})
     
     except requests.exceptions.RequestException as e:
         # Connection error
-        video.status = PredictionStatus.FAILED
-        video.prediction_details = json.dumps({
-            "error": f"Failed to connect to model API: {str(e)}"
-        })
+        db.videos.update_one({"_id": video_oid}, {"$set": {
+            "status": PredictionStatus.FAILED,
+            "prediction_details": json.dumps({"error": f"Failed to connect to model API: {str(e)}"})
+        }})
     
     except Exception as e:
         # Other errors
-        video.status = PredictionStatus.FAILED
-        video.prediction_details = json.dumps({
-            "error": f"Analysis failed: {str(e)}"
-        })
+        db.videos.update_one({"_id": video_oid}, {"$set": {
+            "status": PredictionStatus.FAILED,
+            "prediction_details": json.dumps({"error": f"Analysis failed: {str(e)}"})
+        }})
     
     finally:
-        db.commit()
+        pass
 
 @router.post("/{video_id}/analyze", response_model=dict)
 async def start_analysis(
-    video_id: int,
+    video_id: str,
     background_tasks: BackgroundTasks,
     model_key: str = "default",
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db)
 ):
     """Start deepfake analysis for a video"""
-    video = db.query(Video).filter(
-        Video.id == video_id,
-        Video.user_id == current_user.id
-    ).first()
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    from bson import ObjectId
+    try:
+        video_oid = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid video ID"
+        )
+    
+    video = db.videos.find_one({"_id": video_oid})
     
     if not video:
         raise HTTPException(
@@ -133,10 +154,10 @@ async def start_analysis(
             detail="Video not found"
         )
     
-    if video.status != PredictionStatus.PENDING:
+    if video.get("status") != PredictionStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Video is already {video.status}"
+            detail=f"Video is already {video.get('status')}"
         )
     
     # Start analysis in background
@@ -151,15 +172,27 @@ async def start_analysis(
 
 @router.get("/{video_id}/result", response_model=PredictionResult)
 async def get_prediction_result(
-    video_id: int,
+    video_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db=Depends(get_db)
 ):
     """Get prediction result for a video"""
-    video = db.query(Video).filter(
-        Video.id == video_id,
-        Video.user_id == current_user.id
-    ).first()
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+    
+    from bson import ObjectId
+    try:
+        video_oid = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid video ID"
+        )
+    
+    video = db.videos.find_one({"_id": video_oid})
     
     if not video:
         raise HTTPException(
@@ -167,18 +200,18 @@ async def get_prediction_result(
             detail="Video not found"
         )
     
-    if video.status != PredictionStatus.COMPLETED:
+    if video.get("status") != PredictionStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Analysis not completed yet. Current status: {video.status}"
+            detail=f"Analysis not completed yet. Current status: {video.get('status')}"
         )
     
     # Parse prediction details
-    analysis_details = json.loads(video.prediction_details) if video.prediction_details else {}
+    analysis_details = json.loads(video.get("prediction_details", "{}")) if video.get("prediction_details") else {}
     
     # Generate AI suggestions
     suggestions = []
-    if video.is_deepfake:
+    if video.get("is_deepfake"):
         suggestions = [
             "⚠️ This video shows signs of manipulation",
             "🔍 Check the source and verify authenticity",
@@ -194,8 +227,8 @@ async def get_prediction_result(
         ]
     
     return {
-        "is_deepfake": video.is_deepfake,
-        "confidence_score": video.confidence_score,
+        "is_deepfake": video.get("is_deepfake"),
+        "confidence_score": video.get("confidence_score"),
         "analysis_details": analysis_details,
         "suggestions": suggestions
     }
