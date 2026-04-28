@@ -1,43 +1,49 @@
 """
 Database initialization script
-Creates default admin user if it doesn't exist
+Creates default admin user if it doesn't exist in MongoDB
 """
-from sqlalchemy.orm import Session
-from app.database import SessionLocal, engine, Base
+from app.database import get_db
 from app.models import User, UserRole
 from app.auth import get_password_hash
 from app.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 def init_db():
-    """Initialize database with tables and default admin"""
-    # Create all tables
-    Base.metadata.create_all(bind=engine)
-    
-    db = SessionLocal()
+    """Initialize database with default admin user"""
     try:
+        db = get_db()
+        if not db:
+            logger.warning("⚠️  Database not connected yet")
+            return
+        
         # Check if admin exists by email or username
-        admin = db.query(User).filter(
-            (User.email == settings.ADMIN_EMAIL) | (User.username == "admin")
-        ).first()
+        admin = db.users.find_one({
+            "$or": [
+                {"email": settings.ADMIN_EMAIL},
+                {"username": "admin"}
+            ]
+        })
         
         if not admin:
             # Create default admin
-            admin = User(
+            admin_user = User(
                 email=settings.ADMIN_EMAIL,
                 username="admin",
                 hashed_password=get_password_hash(settings.ADMIN_PASSWORD),
                 role=UserRole.ADMIN,
                 is_active=True
             )
-            db.add(admin)
-            db.commit()
+            db.users.insert_one(admin_user.to_dict())
             print(f"✅ Admin user created: {settings.ADMIN_EMAIL}")
             print(f"   Password: {settings.ADMIN_PASSWORD}")
         else:
-            print(f"ℹ️  Admin user already exists: {admin.email}")
+            print(f"ℹ️  Admin user already exists: {admin['email']}")
     
-    finally:
-        db.close()
+    except Exception as e:
+        logger.error(f"❌ Error initializing database: {e}")
+        raise
 
 if __name__ == "__main__":
     print("🔧 Initializing database...")

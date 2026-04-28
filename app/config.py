@@ -2,12 +2,15 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 class Settings(BaseSettings):
-    # Database
-    DATABASE_URL: str = "sqlite:///./test.db"
+    # Database - MongoDB Atlas URL
+    # Format: mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority&appName=ClusterName
+    DATABASE_URL: str = "mongodb://localhost:27017/deepfake_db"
+    
     # CORS / External service URLs
     CORS_ORIGINS: str = "http://localhost:3000"
     MODEL_API_URL: str = "http://localhost:5000"
     MODEL_API_URLS: str = ""
+    
     # JWT Settings
     SECRET_KEY: str = "your-super-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"

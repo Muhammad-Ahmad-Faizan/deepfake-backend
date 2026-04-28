@@ -4,22 +4,22 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
 
-from app.database import engine, Base
+from app.database import connect_to_mongo, close_mongo
 from app.routes import auth, upload, predictions, dashboard, admin
 from app.config import settings
 from app.init_db import init_db
-
-# Initialize database and create admin user
-init_db()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("🚀 Starting DeepFake Detection API...")
     print(f"📝 API Documentation: http://localhost:8000/docs")
+    connect_to_mongo()
+    init_db()
     yield
     # Shutdown
     print("👋 Shutting down...")
+    close_mongo()
 
 app = FastAPI(
     title="DeepFake Detection API",
