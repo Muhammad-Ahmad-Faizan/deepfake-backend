@@ -2,9 +2,8 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 class Settings(BaseSettings):
-    # Database - MongoDB Atlas URL
-    # Format: mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority&appName=ClusterName
-    DATABASE_URL: str = "mongodb://localhost:27017/deepfake_db"
+    # Database - PostgreSQL (with Neon as primary)
+    DATABASE_URL: str = "postgresql://user:password@localhost:5432/deepfake_db"
     
     # CORS / External service URLs
     CORS_ORIGINS: str = "http://localhost:3000"
