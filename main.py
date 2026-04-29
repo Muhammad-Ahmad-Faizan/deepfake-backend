@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
 import logging
@@ -15,7 +16,12 @@ async def lifespan(app: FastAPI):
     # Startup
     print("🚀 Starting DeepFake Detection API...")
     print(f"📝 API Documentation: http://localhost:8000/docs")
-    init_db()
+    try:
+        init_db()
+        print("✅ Database initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Database initialization warning: {str(e)}")
+        logger.error(f"Database init error: {str(e)}")
     yield
     # Shutdown
     print("👋 Shutting down...")
@@ -47,7 +53,10 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+try:
+    app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+except Exception as e:
+    logger.warning(f"Could not mount uploads directory: {e}")
 
 @app.get("/")
 async def root():
