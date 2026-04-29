@@ -44,15 +44,6 @@ def deepfake_analysis(video_id: int, model_key: str = "default"):
     
     db = SessionLocal()
     try:
-        video = db.query(Video).filter(Video.id == video_id).first()
-        if not video:
-            return
-        
-        # Update status to processing
-        video.status = PredictionStatus.PROCESSING.value
-        db.commit()
-    
-    try:
         backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         absolute_video_path = os.path.join(backend_dir, video.file_path)
 
