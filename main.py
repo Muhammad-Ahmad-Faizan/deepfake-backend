@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import os
 import logging
 
-from app.database import init_db
+from app.init_db import init_db
 from app.routes import auth, upload, predictions, dashboard, admin
 from app.config import settings
 
