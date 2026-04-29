@@ -35,19 +35,22 @@ def get_model_api_url(model_key: str | None) -> str:
         key, value = entry.split("=", 1)
         model_map[key.strip()] = value.strip()
 
-    return model_map.get(model_key, MODEL_API_URL)
-
-def deepfake_analysis(video_id: int, db: Session, model_key: str = "default"):
+def deepfake_analysis(video_id: int, model_key: str = "default"):
     """
     Call the model API to analyze video for deepfake detection
+    Background task that creates its own database session
     """
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        return
+    from app.database import SessionLocal
     
-    # Update status to processing
-    video.status = PredictionStatus.PROCESSING.value
-    db.commit()
+    db = SessionLocal()
+    try:
+        video = db.query(Video).filter(Video.id == video_id).first()
+        if not video:
+            return
+        
+        # Update status to processing
+        video.status = PredictionStatus.PROCESSING.value
+        db.commit()
     
     try:
         backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -112,6 +115,7 @@ def deepfake_analysis(video_id: int, db: Session, model_key: str = "default"):
     
     finally:
         db.commit()
+        db.close()
 
 @router.post("/{video_id}/analyze", response_model=dict)
 async def start_analysis(
@@ -140,7 +144,7 @@ async def start_analysis(
         )
     
     # Start analysis in background
-    background_tasks.add_task(deepfake_analysis, video_id, db, model_key)
+    background_tasks.add_task(deepfake_analysis, video_id, model_key)
     
     return {
         "message": "Analysis started",

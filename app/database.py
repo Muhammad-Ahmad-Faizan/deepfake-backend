@@ -26,22 +26,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-def connect_to_db():
-    """Initialize database connection and create tables"""
-    try:
-        # Test connection
-        with engine.connect() as connection:
-            connection.execute("SELECT 1")
-        
-        # Create all tables
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Connected to PostgreSQL and created tables")
-    except Exception as e:
-        logger.warning(f"⚠️  Database connection warning: {e}")
-        logger.warning("App will continue but database operations may fail")
-
-def close_db():
-    """Close database connection"""
-    engine.dispose()
-    logger.info("Closed PostgreSQL connection")

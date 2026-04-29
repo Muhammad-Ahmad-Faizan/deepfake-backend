@@ -1,25 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
+import logging
 
-from app.database import connect_to_db, close_db
+from app.database import init_db
 from app.routes import auth, upload, predictions, dashboard, admin
 from app.config import settings
-from app.init_db import init_db
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("🚀 Starting DeepFake Detection API...")
     print(f"📝 API Documentation: http://localhost:8000/docs")
-    connect_to_db()
     init_db()
     yield
     # Shutdown
     print("👋 Shutting down...")
-    close_db()
 
 app = FastAPI(
     title="DeepFake Detection API",
