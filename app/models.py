@@ -1,9 +1,10 @@
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List
-from bson import ObjectId
 import base64
-import io
+from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, JSON
+from sqlalchemy.orm import relationship
+from app.database import Base
 
 class UserRole(str, Enum):
     USER = "user"
@@ -15,63 +16,52 @@ class PredictionStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-# User Document Model
-class User:
-    def __init__(self, email: str, username: str, hashed_password: str, 
-                 role: UserRole = UserRole.USER, is_active: bool = True):
-        self.email = email
-        self.username = username
-        self.hashed_password = hashed_password
-        self.role = role.value if isinstance(role, UserRole) else role
-        self.is_active = is_active
-        self.created_at = datetime.utcnow()
+# SQLAlchemy User Model
+class User(Base):
+    __tablename__ = "users"
     
-    def to_dict(self):
-        return {
-            "email": self.email,
-            "username": self.username,
-            "hashed_password": self.hashed_password,
-            "role": self.role,
-            "is_active": self.is_active,
-            "created_at": self.created_at
-        }
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    username = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(50), default=UserRole.USER.value, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship
+    videos = relationship("Video", back_populates="user", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<User(id={self.id}, email={self.email}, username={self.username})>"
 
-# Video Document Model
-class Video:
-    def __init__(self, user_id: str, filename: str, original_filename: str,
-                 file_path: str, file_size: int, file_type: str = "video"):
-        self.user_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-        self.filename = filename
-        self.original_filename = original_filename
-        self.file_path = file_path
-        self.file_size = file_size
-        self.file_type = file_type
-        self.status = PredictionStatus.PENDING.value
-        self.is_deepfake = None
-        self.confidence_score = None
-        self.prediction_details = None
-        self.uploaded_at = datetime.utcnow()
-        self.processed_at = None
-        self.thumbnail_base64 = None  # Base64 encoded thumbnail
-        self.annotated_frames_base64 = []  # List of base64 encoded frames
+# SQLAlchemy Video Model
+class Video(Base):
+    __tablename__ = "videos"
     
-    def to_dict(self):
-        return {
-            "user_id": self.user_id,
-            "filename": self.filename,
-            "original_filename": self.original_filename,
-            "file_path": self.file_path,
-            "file_size": self.file_size,
-            "file_type": self.file_type,
-            "status": self.status,
-            "is_deepfake": self.is_deepfake,
-            "confidence_score": self.confidence_score,
-            "prediction_details": self.prediction_details,
-            "uploaded_at": self.uploaded_at,
-            "processed_at": self.processed_at,
-            "thumbnail_base64": self.thumbnail_base64,
-            "annotated_frames_base64": self.annotated_frames_base64
-        }
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    file_path = Column(String(512), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    file_type = Column(String(50), default="video", nullable=False)
+    
+    status = Column(String(50), default=PredictionStatus.PENDING.value, nullable=False, index=True)
+    is_deepfake = Column(Boolean, nullable=True)
+    confidence_score = Column(Float, nullable=True)
+    prediction_details = Column(JSON, nullable=True)  # Store analysis results as JSON
+    
+    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    processed_at = Column(DateTime, nullable=True)
+    
+    thumbnail_base64 = Column(Text, nullable=True)  # Base64 encoded thumbnail
+    annotated_frames_base64 = Column(JSON, default=list, nullable=True)  # List of base64 frames
+    
+    # Relationship
+    user = relationship("User", back_populates="videos")
+    
+    def __repr__(self):
+        return f"<Video(id={self.id}, user_id={self.user_id}, filename={self.filename})>"
 
 # Helper functions for Base64 encoding
 def encode_image_to_base64(image_bytes: bytes) -> str:

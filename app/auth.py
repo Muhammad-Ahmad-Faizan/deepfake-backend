@@ -4,10 +4,11 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import User
+from app.models import User, UserRole
 from app.schemas import TokenData
 
 # Password hashing
@@ -48,8 +49,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db=Depends(get_db)
-):
+    db: Session = Depends(get_db)
+) -> User:
     """Get current authenticated user"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -66,23 +67,20 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    if db is None:
-        raise credentials_exception
-    
-    user = db.users.find_one({"email": token_data.email})
+    user = db.query(User).filter(User.email == token_data.email).first()
     if user is None:
         raise credentials_exception
     
-    if not user.get("is_active", True):
+    if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     
     return user
 
 async def get_current_admin(
-    current_user=Depends(get_current_user)
-):
+    current_user: User = Depends(get_current_user)
+) -> User:
     """Verify user is an admin"""
-    if current_user.get("role") != "admin":
+    if current_user.role != UserRole.ADMIN.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"

@@ -1,8 +1,9 @@
 """
 Database initialization script
-Creates default admin user if it doesn't exist in MongoDB
+Creates default admin user if it doesn't exist in PostgreSQL
 """
-from app.database import get_db
+from sqlalchemy.orm import Session
+from app.database import SessionLocal, Base, engine
 from app.models import User, UserRole
 from app.auth import get_password_hash
 from app.config import settings
@@ -13,36 +14,43 @@ logger = logging.getLogger(__name__)
 def init_db():
     """Initialize database with default admin user"""
     try:
-        db = get_db()
-        if db is None:
-            logger.warning("⚠️  Database not connected yet")
-            return
+        # Create all tables
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Created all database tables")
         
-        # Check if admin exists by email or username
-        admin = db.users.find_one({
-            "$or": [
-                {"email": settings.ADMIN_EMAIL},
-                {"username": "admin"}
-            ]
-        })
+        # Get database session
+        db: Session = SessionLocal()
         
-        if not admin:
-            # Create default admin
-            admin_user = User(
-                email=settings.ADMIN_EMAIL,
-                username="admin",
-                hashed_password=get_password_hash(settings.ADMIN_PASSWORD),
-                role=UserRole.ADMIN,
-                is_active=True
-            )
-            db.users.insert_one(admin_user.to_dict())
-            print(f"✅ Admin user created: {settings.ADMIN_EMAIL}")
-            print(f"   Password: {settings.ADMIN_PASSWORD}")
-        else:
-            print(f"ℹ️  Admin user already exists: {admin['email']}")
+        try:
+            # Check if admin exists by email
+            admin = db.query(User).filter(
+                (User.email == settings.ADMIN_EMAIL) | 
+                (User.username == "admin")
+            ).first()
+            
+            if not admin:
+                # Create default admin
+                admin_user = User(
+                    email=settings.ADMIN_EMAIL,
+                    username="admin",
+                    hashed_password=get_password_hash(settings.ADMIN_PASSWORD),
+                    role=UserRole.ADMIN.value,
+                    is_active=True
+                )
+                db.add(admin_user)
+                db.commit()
+                logger.info(f"✅ Admin user created: {settings.ADMIN_EMAIL}")
+                print(f"✅ Admin user created: {settings.ADMIN_EMAIL}")
+                print(f"   Password: {settings.ADMIN_PASSWORD}")
+            else:
+                logger.info(f"ℹ️  Admin user already exists: {admin.email}")
+                print(f"ℹ️  Admin user already exists: {admin.email}")
+        finally:
+            db.close()
     
     except Exception as e:
         logger.warning(f"⚠️  Error initializing database: {e}")
+        print(f"⚠️  Error initializing database: {e}")
         # Don't raise - allow app to continue
 
 if __name__ == "__main__":
